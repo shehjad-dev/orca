@@ -25,6 +25,7 @@ import {
 } from './bot-catalog-snapshot'
 import {
   markKeptBotHostDirty,
+  keepBotHostList,
   readKeptBotHostList,
   retainKeptBotHostLists,
   setKeptBotHomesReader
@@ -34,6 +35,7 @@ import { retainListedBotGroupHosts } from './bot-group-catalog-snapshot'
 import { emitBotsChangedWindowEvent } from './bots-changed-window-event'
 import { noteBotHostCameBack } from './bot-host-link-read'
 import type { SharedBotHostView } from '../../../shared/bots/shared-bot-hosts'
+import { sharedBotPlaceholder } from './shared-bot-placeholder'
 import {
   readSharedBotHosts,
   sharedBotHostsHydrated,
@@ -118,6 +120,13 @@ export function syncBotHostListing(input: BotHostListingInput, webClient: boolea
         ])
       ])
     )
+  }
+  // A shared agent is listed as soon as it is found, before its host has answered a read.
+  for (const shared of input.sharedBotHosts) {
+    const hostId = toRuntimeExecutionHostId(shared.environmentId)
+    if (!readKeptBotHostList(hostId)) {
+      keepBotHostList(hostId, { bots: [sharedBotPlaceholder(shared)] })
+    }
   }
   const listing = computeBotHostListing(
     input,

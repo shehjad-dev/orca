@@ -34,6 +34,7 @@ export async function handOffSharedBotMessage(
     return { kind: 'unsupported' }
   }
   const secretKey = Buffer.from(entry.deviceKey.secretKeyB64, 'base64')
+  const text = message.blocks.map((block) => block.text).join('\n\n')
   const sealed = await sealBotTeamShareHeldMessage(NODE_PAIRED_E2EE_PRIMITIVES, {
     hostKey: entry.hostKey,
     message: {
@@ -42,7 +43,7 @@ export async function handOffSharedBotMessage(
       botId: entry.botId,
       chat: message.chat,
       clientMessageId: message.clientMessageId,
-      text: message.blocks.map((block) => block.text).join('\n\n'),
+      text,
       attachments: [],
       sentAt: message.sentAt,
       devicePublicKey: entry.deviceKey.publicKeyB64
@@ -62,6 +63,11 @@ export async function handOffSharedBotMessage(
   }
   return {
     kind: 'held',
-    held: { clientMessageId: message.clientMessageId, chat: message.chat, sentAt: message.sentAt }
+    held: {
+      clientMessageId: message.clientMessageId,
+      chat: message.chat,
+      text,
+      sentAt: message.sentAt
+    }
   }
 }

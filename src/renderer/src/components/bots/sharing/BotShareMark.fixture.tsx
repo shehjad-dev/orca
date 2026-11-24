@@ -19,7 +19,9 @@ const SHARED: SharedBotHostView = {
   botId: 'ivy',
   botName: 'Ivy',
   ownerName: 'Jinwoo Hong',
-  link: 'live'
+  link: 'live',
+  holds: true,
+  held: []
 }
 const SHARED_HOST = toRuntimeExecutionHostId(SHARED.environmentId)
 

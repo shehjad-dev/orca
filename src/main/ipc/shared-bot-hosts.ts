@@ -12,6 +12,10 @@ import { setSharedBotHostRouting } from '../bots/shared-with-me/shared-bot-host-
 const CallArgs = z.object({ environmentId: z.string().min(1), method: z.string().min(1) })
 const SubscribeArgs = CallArgs.extend({ subscriptionId: z.string().min(1) })
 const UnsubscribeArgs = z.object({ subscriptionId: z.string().min(1) })
+const SendAgainArgs = z.object({
+  environmentId: z.string().min(1),
+  clientMessageId: z.string().min(1)
+})
 
 export function registerSharedBotHostsHandlers(args: {
   userDataPath: string
@@ -42,6 +46,7 @@ export function registerSharedBotHostsHandlers(args: {
   for (const channel of [
     'sharedBotHosts:list',
     'sharedBotHosts:call',
+    'sharedBotHosts:sendAgain',
     'sharedBotHosts:subscribe'
   ]) {
     ipcMain.removeHandler(channel)
@@ -54,6 +59,10 @@ export function registerSharedBotHostsHandlers(args: {
   ipcMain.handle('sharedBotHosts:call', (_event, raw: { params?: unknown }) => {
     const { environmentId, method } = CallArgs.parse(raw)
     return hosts.call(environmentId, method, raw.params)
+  })
+  ipcMain.handle('sharedBotHosts:sendAgain', (_event, raw: unknown) => {
+    const { environmentId, clientMessageId } = SendAgainArgs.parse(raw)
+    return hosts.sendAgain(environmentId, clientMessageId)
   })
   ipcMain.handle('sharedBotHosts:subscribe', async (event, raw: { params?: unknown }) => {
     const { environmentId, method, subscriptionId } = SubscribeArgs.parse(raw)

@@ -2,6 +2,8 @@
 // its environment id through main's relay link rather than a paired server's connection.
 import { useSyncExternalStore } from 'react'
 import type { SharedBotHostView } from '../../../../../shared/bots/shared-bot-hosts'
+import { BOT_SHARE_RPC_METHODS } from '../../../../../shared/bots/bot-share-rpc-methods'
+import type { RuntimeRpcFailure } from '../../../../../shared/remote-runtime/rpc/runtime-rpc-envelope'
 import type { RuntimeClientTarget } from '../../../../../shared/remote-runtime/host-catalog/runtime-client-target'
 import {
   parseExecutionHostId,
@@ -54,6 +56,22 @@ export function sharedBotHostFor(target: RuntimeClientTarget): SharedBotHostView
   return target.kind === 'environment'
     ? (views.find((view) => view.environmentId === target.environmentId) ?? null)
     : null
+}
+
+/**
+ * The one gate on what a teammate's Orca asks a shared host: a method off the share allowlist (the
+ * owner's activity, suggestions, paired-server asks, status) is the host's to refuse, so it is
+ * refused here with the host's own answer and never sent. Null when the host takes it.
+ */
+export function sharedBotHostRefusal(method: string): RuntimeRpcFailure | null {
+  return BOT_SHARE_RPC_METHODS.has(method)
+    ? null
+    : {
+        id: method,
+        ok: false,
+        // Read by its code, as from a host that lacks the method; never shown.
+        error: { code: 'method_not_found', message: method }
+      }
 }
 
 export function useSharedBotHosts(): readonly SharedBotHostView[] {

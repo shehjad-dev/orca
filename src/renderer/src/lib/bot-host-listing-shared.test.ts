@@ -16,7 +16,9 @@ const SHARED: SharedBotHostView = {
   botId: 'bot-1',
   botName: 'Ivy',
   ownerName: 'Jinwoo Hong',
-  link: 'live'
+  link: 'live',
+  holds: true,
+  held: []
 }
 const HOST = toRuntimeExecutionHostId(SHARED.environmentId)
 const KEY = `orca.bots.pairedHostList.v2:${HOST}`
