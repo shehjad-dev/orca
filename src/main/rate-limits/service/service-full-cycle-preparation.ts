@@ -289,6 +289,7 @@ export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServ
       zcodeConfigChanged,
       zcodeGeneration,
       antigravityGeneration,
+      antigravityFetchAllowed,
       claudeFetchGated,
       results: [
         claudeResult,

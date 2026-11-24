@@ -1,11 +1,14 @@
 import { EventEmitter } from 'node:events'
 import type { BrowserWindow } from 'electron'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type {
   ProviderRateLimits,
   RateLimitState
 } from '../../../shared/agent-usage/rate-limits/rate-limit-types'
 import { fetchGeminiRateLimits } from '../providers/gemini/gemini-usage-fetcher'
+import { fetchActiveClaudeRateLimits } from '../providers/claude/claude-active-usage-fetch'
+import { fetchCodexRateLimits } from '../providers/codex/codex-fetcher'
+import { fetchAntigravityRateLimits } from '../providers/antigravity/antigravity-usage-fetcher'
 import { RateLimitService } from './rate-limit-service'
 
 const { unavailable } = vi.hoisted(() => ({
@@ -21,10 +24,10 @@ const { unavailable } = vi.hoisted(() => ({
 }))
 
 vi.mock('../providers/claude/claude-active-usage-fetch', () => ({
-  fetchActiveClaudeRateLimits: unavailable('claude')
+  fetchActiveClaudeRateLimits: vi.fn()
 }))
 vi.mock('../providers/codex/codex-fetcher', () => ({
-  fetchCodexRateLimits: unavailable('codex')
+  fetchCodexRateLimits: vi.fn()
 }))
 vi.mock('../providers/gemini/gemini-usage-fetcher', () => ({ fetchGeminiRateLimits: vi.fn() }))
 vi.mock('../providers/opencode-go/opencode-go-usage-source-selection', () => ({
@@ -48,7 +51,7 @@ vi.mock('../providers/zcode/zcode-usage-fetcher', () => ({
   fetchZcodeRateLimits: unavailable('zcode')
 }))
 vi.mock('../providers/antigravity/antigravity-usage-fetcher', () => ({
-  fetchAntigravityRateLimits: unavailable('antigravity')
+  fetchAntigravityRateLimits: vi.fn()
 }))
 vi.mock('../providers/muse/muse-usage-fetcher', () => ({
   fetchMuseRateLimits: unavailable('muse')
@@ -59,23 +62,38 @@ vi.mock('../../minimax/minimax-cookie-store', () => ({
 vi.mock('../../minimax/minimax-api-key-store', () => ({ hasMiniMaxApiKey: async () => false }))
 vi.mock('../../zcode/zcode-plan-api-key-store', () => ({ hasZcodePlanApiKey: async () => false }))
 
+const start = Date.parse('2026-11-22T12:00:00Z')
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(start)
+  vi.mocked(fetchActiveClaudeRateLimits).mockReset().mockImplementation(unavailable('claude'))
+  vi.mocked(fetchCodexRateLimits).mockReset().mockImplementation(unavailable('codex'))
+  vi.mocked(fetchGeminiRateLimits).mockReset().mockImplementation(unavailable('gemini'))
+  vi.mocked(fetchAntigravityRateLimits).mockReset().mockImplementation(unavailable('antigravity'))
+})
+
 afterEach(() => {
   vi.useRealTimers()
 })
 
-it('publishes local usage without a window activation and limits repeated owner returns', async () => {
-  vi.useFakeTimers()
-  const start = Date.parse('2026-11-22T12:00:00Z')
-  vi.setSystemTime(start)
-  let usedPercent = 10
-  vi.mocked(fetchGeminiRateLimits).mockImplementation(async () => ({
-    provider: 'gemini',
+function reading(
+  provider: ProviderRateLimits['provider'],
+  usedPercent: number
+): ProviderRateLimits {
+  return {
+    provider,
     session: { usedPercent, windowMinutes: 300, resetsAt: null, resetDescription: null },
     weekly: null,
     updatedAt: Date.now(),
     error: null,
     status: 'ok'
-  }))
+  }
+}
+
+it('publishes local usage without a window activation and limits repeated owner returns', async () => {
+  let usedPercent = 10
+  vi.mocked(fetchGeminiRateLimits).mockImplementation(async () => reading('gemini', usedPercent))
   const service = new RateLimitService()
   let published: RateLimitState | undefined
   let focused = true
@@ -130,6 +148,138 @@ it('publishes local usage without a window activation and limits repeated owner 
     await service.refreshOnOwnerReturn()
     expect((await service.getState()).gemini?.session?.usedPercent).toBe(95)
   } finally {
+    service.stop()
+  }
+})
+
+it('refreshes a cleared Antigravity reading while the Codex target stays gated', async () => {
+  const service = new RateLimitService()
+  const gemini = vi.mocked(fetchGeminiRateLimits)
+  const antigravity = vi.mocked(fetchAntigravityRateLimits)
+  let loginSwitched = true
+  service.setCodexHomePathResolver(() => ({ kind: 'skip' }))
+  service.setAntigravityAccountUsageRecorder({
+    begin: async () => ({ login: { key: 'test', accountId: null, email: null }, accounts: [] }),
+    finish: async () => {
+      if (loginSwitched) {
+        loginSwitched = false
+        return { switched: true }
+      }
+      return { switched: false, account: { id: null, email: null }, accounts: [] }
+    }
+  })
+
+  try {
+    gemini.mockImplementation(async () => reading('gemini', 10))
+    antigravity.mockImplementation(async () => reading('antigravity', 40))
+    expect((await service.refreshIfStale()).antigravity).toBeNull()
+
+    vi.setSystemTime(start + 60_000)
+    antigravity.mockImplementation(async () => reading('antigravity', 70))
+    expect((await service.refreshIfStale()).antigravity?.session?.usedPercent).toBe(70)
+
+    vi.setSystemTime(start + 90_000)
+    gemini.mockImplementation(async () => reading('gemini', 60))
+    expect((await service.refreshIfStale()).gemini?.session?.usedPercent).toBe(10)
+
+    service.invalidateAntigravityCredentialState()
+    antigravity.mockImplementation(async () => reading('antigravity', 90))
+    expect((await service.refreshIfStale()).antigravity?.session?.usedPercent).toBe(90)
+  } finally {
+    service.stop()
+  }
+})
+
+it('preserves a Codex reading when its home becomes gated during a full read', async () => {
+  const service = new RateLimitService()
+  const codex = vi.mocked(fetchCodexRateLimits)
+  const gemini = vi.mocked(fetchGeminiRateLimits)
+  let gated = false
+  service.setCodexHomePathResolver(() =>
+    gated ? { kind: 'skip' } : { kind: 'ready', codexHomePath: null }
+  )
+
+  try {
+    codex.mockImplementation(async () => reading('codex', 36))
+    gemini.mockImplementation(async () => reading('gemini', 10))
+    expect((await service.refresh()).codex?.session?.usedPercent).toBe(36)
+
+    vi.setSystemTime(start + 290_000)
+    codex.mockImplementationOnce(async () => {
+      gated = true
+      return reading('codex', 67)
+    })
+    expect((await service.refresh()).codex?.session?.usedPercent).toBe(36)
+
+    vi.setSystemTime(start + 305_000)
+    gemini.mockImplementation(async () => reading('gemini', 60))
+    expect((await service.refreshIfStale()).gemini?.session?.usedPercent).toBe(10)
+
+    vi.setSystemTime(start + 590_000)
+    gated = false
+    codex.mockImplementation(async () => reading('codex', 72))
+    expect((await service.refreshIfStale()).codex?.session?.usedPercent).toBe(72)
+  } finally {
+    service.stop()
+  }
+})
+
+function claudeFailure(error: string, retryAtMs?: number): ProviderRateLimits {
+  return {
+    provider: 'claude',
+    session: null,
+    weekly: null,
+    updatedAt: Date.now(),
+    error,
+    status: 'error',
+    ...(retryAtMs === undefined
+      ? {}
+      : { usageMetadata: { failureKind: 'rate-limited', retryAtMs } })
+  }
+}
+
+it('preserves Claude retry eligibility when a held full refresh later reads and fails', async () => {
+  const service = new RateLimitService()
+  const claude = vi.mocked(fetchActiveClaudeRateLimits)
+  const ready = { kind: 'ready' as const, codexHomePath: null }
+  const homePrepared = Promise.withResolvers<typeof ready>()
+  const preparingHome = Promise.withResolvers<void>()
+  const resolveCodexHome = vi.fn(async () => ready)
+  service.setCodexHomePathResolver(resolveCodexHome)
+
+  try {
+    claude.mockImplementation(async () => claudeFailure('Initial failure'))
+    expect((await service.refresh()).claude?.error).toBe('Initial failure')
+
+    const holdUntil = start + 310_000
+    vi.setSystemTime(start + 1_000)
+    claude.mockImplementation(async () => claudeFailure('Rate limited', holdUntil))
+    expect((await service.refreshIfStale()).claude?.usageMetadata?.retryAtMs).toBe(holdUntil)
+
+    vi.setSystemTime(start + 300_000)
+    resolveCodexHome.mockImplementationOnce(() => {
+      preparingHome.resolve()
+      return homePrepared.promise
+    })
+    const activation = service.refreshIfStale()
+    await preparingHome.promise
+    vi.setSystemTime(holdUntil)
+    claude.mockImplementation(async () => claudeFailure('Full read failed'))
+    homePrepared.resolve(ready)
+    expect((await activation).claude?.error).toBe('Full read failed')
+
+    vi.setSystemTime(start + 311_000)
+    claude.mockImplementation(async () => claudeFailure('Selective read failed'))
+    expect((await service.refreshIfStale()).claude?.error).toBe('Selective read failed')
+
+    vi.setSystemTime(start + 312_000)
+    claude.mockImplementation(async () => reading('claude', 72))
+    expect((await service.refreshIfStale()).claude?.error).toBe('Selective read failed')
+
+    vi.setSystemTime(start + 552_000)
+    expect((await service.refreshIfStale()).claude?.session?.usedPercent).toBe(72)
+  } finally {
+    homePrepared.resolve(ready)
     service.stop()
   }
 })

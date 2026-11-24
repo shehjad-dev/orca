@@ -5,6 +5,7 @@ import type {
 import { isCodexUsageSignInRequired } from '../../../shared/agent-accounts/codex/codex-auth-errors'
 import { RateLimitServiceFetchControl } from './service-fetch-control'
 import {
+  INDIVIDUALLY_REFRESHABLE_PROVIDERS,
   LONG_STALE_THRESHOLD_MS,
   MAX_ACTIVE_FAILURE_STREAK,
   STALE_THRESHOLD_MS,
@@ -100,6 +101,9 @@ export abstract class RateLimitServiceResultPolicy extends RateLimitServiceFetch
     fresh: ProviderRateLimits
   ): void {
     if (fresh.status === 'error') {
+      if (!INDIVIDUALLY_REFRESHABLE_PROVIDERS.has(provider)) {
+        this.lastActiveFailureRetryAtByProvider[provider] = Date.now()
+      }
       this.activeFailureStreakByProvider[provider] = Math.min(
         this.activeFailureStreakByProvider[provider] + 1,
         MAX_ACTIVE_FAILURE_STREAK

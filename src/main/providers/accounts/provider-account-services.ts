@@ -153,11 +153,9 @@ export function createProviderAccountServices(
   rateLimits.setGeminiCliOAuthEnabledResolver(() => store.getSettings().geminiCliOAuthEnabled)
   rateLimits.setClaudeOAuthUsageEnabledResolver(() => store.getSettings().claudeOAuthUsageEnabled)
   // Reuse the meter switch so hidden Antigravity usage does not spawn agy.
-  rateLimits.setAntigravityUsageEnabledResolver(() =>
-    store.getUI().statusBarItems.includes('antigravity')
-  )
+  rateLimits.setAntigravityUsageEnabledResolver(() => store.isStatusBarItemEnabled('antigravity'))
   // Hidden Muse meters must not spawn the Muse CLI.
-  rateLimits.setMuseUsageEnabledResolver(() => store.getUI().statusBarItems.includes('muse'))
+  rateLimits.setMuseUsageEnabledResolver(() => store.isStatusBarItemEnabled('muse'))
   setAntigravityNativeCredentialChangeListener(() =>
     rateLimits.invalidateAntigravityCredentialState()
   )

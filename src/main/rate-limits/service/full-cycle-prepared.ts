@@ -24,6 +24,7 @@ export type FetchAllCyclePrepared = {
   zcodeConfigChanged: boolean
   zcodeGeneration: number
   antigravityGeneration: number
+  antigravityFetchAllowed: boolean
   claudeFetchGated: boolean
   results: [
     PromiseSettledResult<ProviderRateLimits>,
